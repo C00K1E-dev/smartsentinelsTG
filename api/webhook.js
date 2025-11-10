@@ -13,6 +13,11 @@ let bot;
 
 // For Vercel serverless, we use webhook mode
 export default async function handler(req, res) {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
+  res.setHeader('Content-Type', 'application/json');
+
   if (req.method === 'POST') {
     try {
       // Initialize bot if not already done
@@ -22,12 +27,18 @@ export default async function handler(req, res) {
 
       // Process incoming update
       const update = req.body;
-      await processUpdate(update);
-
+      
+      // Telegram expects a 200 response immediately
       res.status(200).json({ ok: true });
+      
+      // Process update asynchronously (don't await here)
+      processUpdate(update).catch(err => {
+        console.error('Error processing update:', err);
+      });
+
     } catch (error) {
       console.error('Webhook error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(200).json({ ok: true }); // Still return 200 to Telegram
     }
   } else if (req.method === 'GET') {
     // Health check endpoint
