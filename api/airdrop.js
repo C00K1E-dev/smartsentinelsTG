@@ -144,6 +144,83 @@ export default async function handler(req, res) {
         });
       }
 
+      // Export all data (for theMiracle or other integrations)
+      if (action === 'export') {
+        const format = req.query.format || 'json';
+        
+        // Get all users with points > 0
+        const allUsers = Array.from(airdropData.values())
+          .filter(user => user.points > 0)
+          .sort((a, b) => b.points - a.points);
+
+        if (format === 'csv') {
+          // CSV format
+          const csvHeader = 'Wallet Address,Points,Tasks Completed,Telegram User ID,Created At,Last Updated\n';
+          const csvRows = allUsers.map(user => 
+            `${user.walletAddress},${user.points},${user.completedTasks.length},${user.telegramUserId || 'N/A'},${new Date(user.createdAt).toISOString()},${new Date(user.lastUpdated).toISOString()}`
+          ).join('\n');
+          
+          res.setHeader('Content-Type', 'text/csv');
+          res.setHeader('Content-Disposition', `attachment; filename="airdrop_data_${Date.now()}.csv"`);
+          return res.status(200).send(csvHeader + csvRows);
+        }
+
+        if (format === 'themiracle') {
+          // theMiracle API format
+          const miracleFormat = allUsers.map(user => ({
+            address: user.walletAddress,
+            allocation: user.points,
+            metadata: {
+              tasksCompleted: user.completedTasks.length,
+              telegramVerified: !!user.telegramUserId,
+              timestamp: user.lastUpdated
+            }
+          }));
+
+          return res.status(200).json({
+            success: true,
+            totalParticipants: miracleFormat.length,
+            totalPoints: allUsers.reduce((sum, u) => sum + u.points, 0),
+            data: miracleFormat,
+            exportedAt: new Date().toISOString()
+          });
+        }
+
+        // Default JSON format with full details
+        return res.status(200).json({
+          success: true,
+          totalParticipants: allUsers.length,
+          totalPoints: allUsers.reduce((sum, u) => sum + u.points, 0),
+          data: allUsers,
+          exportedAt: new Date().toISOString()
+        });
+      }
+
+      // Get statistics
+      if (action === 'stats') {
+        const totalUsers = airdropData.size;
+        const totalPoints = Array.from(airdropData.values()).reduce((sum, u) => sum + u.points, 0);
+        const totalTelegramLinks = telegramLinks.size;
+        
+        const taskCompletionStats = {};
+        Array.from(airdropData.values()).forEach(user => {
+          user.completedTasks.forEach(taskId => {
+            taskCompletionStats[taskId] = (taskCompletionStats[taskId] || 0) + 1;
+          });
+        });
+
+        return res.status(200).json({
+          success: true,
+          stats: {
+            totalParticipants: totalUsers,
+            totalPointsDistributed: totalPoints,
+            totalTelegramLinks: totalTelegramLinks,
+            averagePointsPerUser: totalUsers > 0 ? (totalPoints / totalUsers).toFixed(2) : 0,
+            taskCompletionRates: taskCompletionStats
+          }
+        });
+      }
+
       return res.status(400).json({ error: 'Invalid action' });
     }
 
