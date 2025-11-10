@@ -27,18 +27,18 @@ export default async function handler(req, res) {
   
   // Handle POST requests (webhook)
   if (req.method === 'POST') {
-    // Respond immediately to Telegram
-    res.status(200).json({ ok: true });
-    
-    // Process update async
     try {
       const update = req.body;
+      
+      // Process update first, then respond
       await processUpdate(update);
+      
+      // Respond to Telegram
+      return res.status(200).json({ ok: true });
     } catch (error) {
       console.error('Error:', error);
+      return res.status(200).json({ ok: true });
     }
-    
-    return;
   }
   
   return res.status(405).json({ error: 'Method not allowed' });
@@ -122,14 +122,28 @@ I help verify your Telegram membership for the SSTL Airdrop.
 
 async function handleVerify(chatId, userId, username) {
   try {
+    console.log('Verifying user:', userId, 'in chat:', chatId);
+    
+    // Send "checking" message first
+    await telegramRequest('sendMessage', {
+      chat_id: chatId,
+      text: '⏳ Checking your membership...'
+    });
+    
     // Check membership
     const result = await telegramRequest('getChatMember', {
       chat_id: TELEGRAM_CHAT_ID,
       user_id: userId
     });
     
+    console.log('getChatMember result:', JSON.stringify(result));
+    
     if (!result.ok) {
-      throw new Error(result.description || 'Failed to verify');
+      await telegramRequest('sendMessage', {
+        chat_id: chatId,
+        text: `❌ Error: ${result.description || 'Unknown error'}`
+      });
+      return;
     }
     
     const status = result.result.status;
@@ -160,6 +174,8 @@ Use your User ID (\`${userId}\`) on the airdrop website!
       await telegramRequest('sendMessage', {
         chat_id: chatId,
         text: `❌ *Not a Member*
+
+Status: ${status}
 
 Please join first:
 👉 https://t.me/SmartSentinelsCommunity
