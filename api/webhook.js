@@ -49,29 +49,28 @@ async function answerCallbackQuery(callbackQueryId, text) {
 // For Vercel serverless, we use webhook mode
 export default async function handler(req, res) {
   if (req.method === 'POST') {
+    // Return 200 OK immediately
+    res.status(200).json({ ok: true });
+    
     try {
       const update = req.body;
       
-      // Process update asynchronously
+      // Process update asynchronously (don't await)
       processUpdate(update).catch(err => {
         console.error('Error processing update:', err);
       });
 
-      // Return 200 immediately to Telegram
-      return res.status(200).send('OK');
-
     } catch (error) {
       console.error('Webhook error:', error);
-      return res.status(200).send('OK');
     }
   } else if (req.method === 'GET') {
-    return res.status(200).json({ 
+    res.status(200).json({ 
       status: 'ok', 
       bot: 'SmartSentinels Telegram Verification Bot',
       timestamp: new Date().toISOString()
     });
   } else {
-    return res.status(405).json({ error: 'Method not allowed' });
+    res.status(405).json({ error: 'Method not allowed' });
   }
 }
 
