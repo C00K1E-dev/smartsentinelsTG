@@ -11,9 +11,7 @@
   "keywords": ["telegram", "bot", "verification", "airdrop", "smartsentinels"],
   "author": "SmartSentinels",
   "license": "MIT",
-  "dependencies": {
-    "node-telegram-bot-api": "^0.64.0"
-  },
+  "dependencies": {},
   "engines": {
     "node": ">=18.0.0"
   }

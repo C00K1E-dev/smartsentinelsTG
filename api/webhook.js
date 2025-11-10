@@ -1,61 +1,81 @@
-import TelegramBot from 'node-telegram-bot-api';
-
 // Environment variables
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://smartsentinels.net';
 
-// In-memory storage for user verification data (in production, use a database)
-const verifiedUsers = new Map();
+// Telegram API helper
+async function sendMessage(chatId, text, options = {}) {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: text,
+      parse_mode: 'Markdown',
+      ...options
+    })
+  });
+  return response.json();
+}
 
-// Initialize bot
-let bot;
+async function getChatMember(chatId, userId) {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChatMember`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      user_id: userId
+    })
+  });
+  return response.json();
+}
+
+async function answerCallbackQuery(callbackQueryId, text) {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      callback_query_id: callbackQueryId,
+      text: text,
+      show_alert: true
+    })
+  });
+  return response.json();
+}
 
 // For Vercel serverless, we use webhook mode
 export default async function handler(req, res) {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
-  res.setHeader('Content-Type', 'application/json');
-
   if (req.method === 'POST') {
     try {
-      // Initialize bot if not already done
-      if (!bot) {
-        bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
-      }
-
-      // Process incoming update
       const update = req.body;
       
-      // Telegram expects a 200 response immediately
-      res.status(200).json({ ok: true });
-      
-      // Process update asynchronously (don't await here)
+      // Process update asynchronously
       processUpdate(update).catch(err => {
         console.error('Error processing update:', err);
       });
 
+      // Return 200 immediately to Telegram
+      return res.status(200).send('OK');
+
     } catch (error) {
       console.error('Webhook error:', error);
-      res.status(200).json({ ok: true }); // Still return 200 to Telegram
+      return res.status(200).send('OK');
     }
   } else if (req.method === 'GET') {
-    // Health check endpoint
-    res.status(200).json({ 
+    return res.status(200).json({ 
       status: 'ok', 
       bot: 'SmartSentinels Telegram Verification Bot',
       timestamp: new Date().toISOString()
     });
   } else {
-    res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 }
 
 async function processUpdate(update) {
-  if (!bot) {
-    bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
-  }
 
   // Handle messages
   if (update.message) {
@@ -115,16 +135,7 @@ I help verify your Telegram membership for the SSTL Airdrop Campaign.
 `;
 
   if (walletAddress) {
-    // Store verification data
-    verifiedUsers.set(userId, {
-      walletAddress,
-      username,
-      timestamp: Date.now(),
-      verified: false
-    });
-
-    await bot.sendMessage(chatId, welcomeMessage + `\n\n✅ Wallet address linked: \`${walletAddress}\``, {
-      parse_mode: 'Markdown',
+    await sendMessage(chatId, welcomeMessage + `\n\n✅ Wallet address linked: \`${walletAddress}\``, {
       reply_markup: {
         inline_keyboard: [
           [{ text: '✅ Verify Membership', callback_data: 'verify_membership' }],
@@ -133,25 +144,24 @@ I help verify your Telegram membership for the SSTL Airdrop Campaign.
       }
     });
   } else {
-    await bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
+    await sendMessage(chatId, welcomeMessage);
   }
 }
 
 async function handleVerifyCommand(chatId, userId, username) {
   try {
     // Check if user is a member of the group
-    const chatMember = await bot.getChatMember(TELEGRAM_CHAT_ID, userId);
-    const status = chatMember.status;
+    const result = await getChatMember(TELEGRAM_CHAT_ID, userId);
+    
+    if (!result.ok) {
+      throw new Error(result.description || 'Failed to check membership');
+    }
+
+    const status = result.result.status;
     const isMember = ['creator', 'administrator', 'member', 'restricted'].includes(status);
 
     if (isMember) {
-      // Update verification status
-      const userData = verifiedUsers.get(userId) || {};
-      userData.verified = true;
-      userData.verificationTime = Date.now();
-      verifiedUsers.set(userId, userData);
-
-      await bot.sendMessage(chatId, `
+      await sendMessage(chatId, `
 ✅ *Verification Successful!*
 
 You are a verified member of SmartSentinels Community!
@@ -164,7 +174,6 @@ Use your User ID (\`${userId}\`) on the airdrop website to claim your points!
 
 🌐 ${FRONTEND_URL}
 `, {
-        parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
             [{ text: '🎁 Claim Airdrop Points', url: FRONTEND_URL }]
@@ -172,7 +181,7 @@ Use your User ID (\`${userId}\`) on the airdrop website to claim your points!
         }
       });
     } else {
-      await bot.sendMessage(chatId, `
+      await sendMessage(chatId, `
 ❌ *Verification Failed*
 
 You are not a member of SmartSentinels Community.
@@ -183,11 +192,11 @@ Please join the group first:
 👉 https://t.me/SmartSentinelsCommunity
 
 After joining, use /verify again to confirm your membership.
-`, { parse_mode: 'Markdown' });
+`);
     }
   } catch (error) {
     console.error('Verification error:', error);
-    await bot.sendMessage(chatId, `
+    await sendMessage(chatId, `
 ⚠️ *Verification Error*
 
 Unable to verify your membership. Please make sure:
@@ -196,12 +205,12 @@ Unable to verify your membership. Please make sure:
 3. Try again in a few seconds
 
 Error: ${error.message}
-`, { parse_mode: 'Markdown' });
+`);
   }
 }
 
 async function handleMyIdCommand(chatId, userId, username) {
-  await bot.sendMessage(chatId, `
+  await sendMessage(chatId, `
 🆔 *Your Telegram Information*
 
 *User ID:* \`${userId}\`
@@ -210,11 +219,11 @@ async function handleMyIdCommand(chatId, userId, username) {
 Use this User ID on the SmartSentinels airdrop website to verify your membership!
 
 💡 Tip: You can click on your User ID to copy it.
-`, { parse_mode: 'Markdown' });
+`);
 }
 
 async function handleHelpCommand(chatId) {
-  await bot.sendMessage(chatId, `
+  await sendMessage(chatId, `
 📖 *SmartSentinels Bot Help*
 
 *Available Commands:*
@@ -235,7 +244,7 @@ async function handleHelpCommand(chatId) {
 🐦 Twitter: https://twitter.com/SmartSentinels_
 
 Need help? Contact the team in our Telegram group!
-`, { parse_mode: 'Markdown' });
+`);
 }
 
 async function handleCallbackQuery(callbackQuery) {
@@ -245,25 +254,9 @@ async function handleCallbackQuery(callbackQuery) {
   const data = callbackQuery.data;
 
   // Answer the callback query to remove loading state
-  await bot.answerCallbackQuery(callbackQuery.id);
+  await answerCallbackQuery(callbackQuery.id, 'Processing...');
 
   if (data === 'verify_membership') {
     await handleVerifyCommand(chatId, userId, username);
   }
-}
-
-// For local development
-if (process.env.NODE_ENV !== 'production') {
-  console.log('Starting bot in development mode...');
-  bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-
-  bot.on('message', async (msg) => {
-    await processUpdate({ message: msg });
-  });
-
-  bot.on('callback_query', async (query) => {
-    await processUpdate({ callback_query: query });
-  });
-
-  console.log('✅ Bot is running in polling mode');
 }
